@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: ai-project-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+    systemPackages:
+      - tesseract-ocr
+      - poppler-utils
+      - wkhtmltopdf 
