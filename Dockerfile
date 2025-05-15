@@ -1,5 +1,5 @@
-# Use Python 3.10 as the base image
-FROM python:3.10-slim
+# Use Python 3.11 as the base image
+FROM python:3.11-slim
 
 # Set environment variables to prevent interactive prompts during installation
 ENV PYTHONUNBUFFERED=1 \
@@ -10,20 +10,11 @@ ENV PYTHONUNBUFFERED=1 \
 # - Poppler for pdf2image
 # - wkhtmltopdf for pdfkit (HTML to PDF)
 # - libgl1-mesa-glx often needed for GUI-less image processing
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     poppler-utils \
-    wget \
-    libgl1-mesa-glx \
-    build-essential \
-    python3-dev \
-    libpoppler-cpp-dev \
-    libtesseract-dev \
-    xfonts-75dpi \
-    xfonts-base \
     wkhtmltopdf \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*    watch -n 1 df -h
+    && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory in the container
 WORKDIR /app
@@ -32,16 +23,15 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Install Python dependencies
-RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application code into the container
-COPY app.py .
+COPY . .
 # If you have other .py files or assets, copy them too:
 # COPY ./helpers /app/helpers
 
-# Make port 5002 available to the world outside this container
-EXPOSE 5002
+# Make port 5001 available to the world outside this container
+EXPOSE 5001
 
 # Ensure it's writable by the user running the app inside the container.
 RUN mkdir -p /app/local_outputs && chmod 777 /app/local_outputs
@@ -59,4 +49,4 @@ ENV LOCAL_OUTPUT_DIR="/app/local_outputs"
 
 
 # Run the application using Gunicorn for production
-CMD ["gunicorn", "--bind", "0.0.0.0:5002", "--workers", "2", "--threads", "4", "--timeout", "120", "app:app"]
+CMD ["gunicorn", "app:app"]
