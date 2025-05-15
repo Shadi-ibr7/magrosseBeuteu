@@ -41,4 +41,4 @@ ENV PORT=5001
 ENV LOCAL_OUTPUT_DIR="/app/local_outputs"
 
 # Run the application using Gunicorn for production
-CMD ["gunicorn", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5001", "app:app"]

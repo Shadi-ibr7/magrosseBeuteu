@@ -5,12 +5,12 @@ The error indicates that a container with the name `/pdf-api-container` already 
 ### **Option 1: Remove the Existing Container**
 1. **Stop the Existing Container**:
    ```bash
-   docker stop pdf-api-container
+   docker stop pdf-api-container || true
    ```
 
 2. **Remove the Existing Container**:
    ```bash
-   docker rm pdf-api-container
+   docker rm pdf-api-container || true
    ```
 
 3. **Run the New Container**:
@@ -43,7 +43,7 @@ docker run -d -p 5002:5002 \
 ---
 
 ### **Option 3: Check the Existing Container**
-If you’re unsure about the state of the existing container, you can inspect it:
+If you're unsure about the state of the existing container, you can inspect it:
 
 1. **List All Containers**:
    ```bash
