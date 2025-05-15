@@ -1,7 +1,7 @@
 Flask==3.0.2
+flask_login
+flask_sqlalchemy
 python-dotenv==1.0.1
-supabase==2.3.4
-python-multipart==0.0.9
 gunicorn==21.2.0
 pytest==8.0.2
 requests==2.31.0
