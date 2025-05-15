@@ -26,9 +26,6 @@ import pdfkit
 import boto3
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError, ClientError
 
-# Supabase imports
-from supabase import create_client, Client
-
 # --- Environment Variable Loading ---
 from dotenv import load_dotenv
 load_dotenv() # Loads .env file if present (for local development)
@@ -51,12 +48,7 @@ AWS_REGION = os.getenv('AWS_REGION')
 # Remote URL (Optional - only if using remote URL output)
 OUTPUT_SERVER_URL = os.getenv('OUTPUT_SERVER_URL')
 # Local Output (Optional - for saving processed files locally in the container)
-LOCAL_OUTPUT_DIR = os.getenv('LOCAL_OUTPUT_DIR')
-
-# Configuration Supabase
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-BUCKET_NAME = os.getenv("BUCKET_NAME", "uploads")
+LOCAL_OUTPUT_DIR = os.getenv('LOCAL_OUTPUT_DIR', 'uploads')
 
 # Configuration des types de fichiers autorisés
 ALLOWED_EXTENSIONS = {
@@ -1034,31 +1026,21 @@ def upload_file():
         return jsonify({'error': message}), 400
     
     try:
-        # Initialisation du client Supabase
-        supabase = init_supabase()
-        if not supabase:
-            return jsonify({'error': 'Erreur de connexion à Supabase'}), 500
-        
         # Sécurisation du nom de fichier
         filename = secure_filename(file.filename)
         
-        # Upload vers Supabase Storage
-        file_content = file.read()
-        file_type = ALLOWED_EXTENSIONS[filename.rsplit('.', 1)[1].lower()]
+        # Création du dossier uploads s'il n'existe pas
+        upload_dir = Path(LOCAL_OUTPUT_DIR)
+        upload_dir.mkdir(parents=True, exist_ok=True)
         
-        result = supabase.storage.from_(BUCKET_NAME).upload(
-            path=filename,
-            file=file_content,
-            file_options={"content-type": file_type}
-        )
-        
-        # Génération de l'URL publique
-        public_url = supabase.storage.from_(BUCKET_NAME).get_public_url(filename)
+        # Sauvegarde du fichier localement
+        file_path = upload_dir / filename
+        file.save(str(file_path))
         
         return jsonify({
             'message': 'Fichier uploadé avec succès',
             'filename': filename,
-            'public_url': public_url
+            'file_path': str(file_path)
         }), 200
         
     except Exception as e:
@@ -1094,29 +1076,6 @@ def clean_ai_html_response(response: str) -> str:
     if response.endswith("```"):
         response = response[:-3]
     return response.strip()
-
-def init_supabase() -> Optional[Client]:
-    """Initialise et retourne le client Supabase."""
-    if not SUPABASE_URL:
-        logger.error("SUPABASE_URL n'est pas configuré")
-        return None
-    if not SUPABASE_KEY:
-        logger.error("SUPABASE_KEY n'est pas configurée")
-        return None
-    if not BUCKET_NAME:
-        logger.error("BUCKET_NAME n'est pas configuré")
-        return None
-        
-    try:
-        logger.info(f"Tentative de connexion à Supabase avec l'URL: {SUPABASE_URL}")
-        client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        # Test de la connexion
-        client.storage.get_bucket(BUCKET_NAME)
-        logger.info("Connexion à Supabase réussie")
-        return client
-    except Exception as e:
-        logger.error(f"Erreur lors de l'initialisation de Supabase: {str(e)}")
-        return None
 
 def allowed_file(filename: str) -> bool:
     """Vérifie si le type de fichier est autorisé."""
