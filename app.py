@@ -1097,8 +1097,23 @@ def clean_ai_html_response(response: str) -> str:
 
 def init_supabase() -> Optional[Client]:
     """Initialise et retourne le client Supabase."""
+    if not SUPABASE_URL:
+        logger.error("SUPABASE_URL n'est pas configuré")
+        return None
+    if not SUPABASE_KEY:
+        logger.error("SUPABASE_KEY n'est pas configurée")
+        return None
+    if not BUCKET_NAME:
+        logger.error("BUCKET_NAME n'est pas configuré")
+        return None
+        
     try:
-        return create_client(SUPABASE_URL, SUPABASE_KEY)
+        logger.info(f"Tentative de connexion à Supabase avec l'URL: {SUPABASE_URL}")
+        client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        # Test de la connexion
+        client.storage.get_bucket(BUCKET_NAME)
+        logger.info("Connexion à Supabase réussie")
+        return client
     except Exception as e:
         logger.error(f"Erreur lors de l'initialisation de Supabase: {str(e)}")
         return None
