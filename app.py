@@ -13,8 +13,9 @@ import traceback
 import logging
 
 # Flask and Web Server related imports
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory, redirect, url_for, render_template, flash
 from werkzeug.utils import secure_filename
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # PDF/Image/OCR Processing imports
 import google.generativeai as genai
@@ -26,6 +27,10 @@ import pdfkit
 import boto3
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError, ClientError
 
+# Flask-Login imports
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from flask_sqlalchemy import SQLAlchemy
+
 # --- Environment Variable Loading ---
 from dotenv import load_dotenv
 load_dotenv() # Loads .env file if present (for local development)
@@ -36,6 +41,23 @@ logger = logging.getLogger(__name__)
 
 # --- Flask App Initialization ---
 app = Flask(__name__)
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'change_this_secret')
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
+db = SQLAlchemy(app)
+
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), unique=True, nullable=False)
+    email = db.Column(db.String(150), unique=True, nullable=False)
+    password = db.Column(db.String(150), nullable=False)
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
 
 # --- Configuration ---
 # Required
@@ -61,6 +83,22 @@ ALLOWED_EXTENSIONS = {
 
 # Taille maximale de fichier (10MB)
 MAX_CONTENT_LENGTH = 10 * 1024 * 1024
+
+def allowed_file(filename: str) -> bool:
+    """Vérifie si le type de fichier est autorisé."""
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def validate_file(file):
+    if file is None:
+        return False, "Aucun fichier n'a été fourni"
+    if file.filename == '':
+        return False, "Aucun fichier sélectionné"
+    if not allowed_file(file.filename):
+        return False, "Type de fichier non autorisé"
+    if file.content_length and file.content_length > MAX_CONTENT_LENGTH:
+        return False, "Fichier trop volumineux"
+    return True, ""
 
 # --- Gemini Configuration ---
 if not GEMINI_API_KEY:
@@ -1015,53 +1053,194 @@ def send_to_remote_url(file_path: Path, original_filename: str) -> Tuple[bool, O
 # --- API Endpoint ---
 @app.route('/', methods=['GET'])
 def index():
-    return '''
-    <h2>Bienvenue sur l'API Upload !</h2>
-    <form action="/upload" method="post" enctype="multipart/form-data">
-      <input type="file" name="file" />
-      <input type="submit" value="Upload" />
-    </form>
-    '''
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    return redirect(url_for('login'))
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+        
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        email = request.form.get('email', '').strip()
+        password = request.form.get('password', '')
+        confirm_password = request.form.get('confirm_password', '')
+        
+        # Validation des champs
+        if not username or not email or not password or not confirm_password:
+            flash('Tous les champs sont obligatoires', 'error')
+            return redirect(url_for('register'))
+            
+        if len(username) < 3:
+            flash('Le nom d\'utilisateur doit contenir au moins 3 caractères', 'error')
+            return redirect(url_for('register'))
+            
+        if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+            flash('Format d\'email invalide', 'error')
+            return redirect(url_for('register'))
+            
+        if len(password) < 8:
+            flash('Le mot de passe doit contenir au moins 8 caractères', 'error')
+            return redirect(url_for('register'))
+            
+        if password != confirm_password:
+            flash('Les mots de passe ne correspondent pas', 'error')
+            return redirect(url_for('register'))
+        
+        # Vérification des doublons
+        if User.query.filter_by(username=username).first():
+            flash('Ce nom d\'utilisateur est déjà pris', 'error')
+            return redirect(url_for('register'))
+            
+        if User.query.filter_by(email=email).first():
+            flash('Cet email est déjà utilisé', 'error')
+            return redirect(url_for('register'))
+        
+        try:
+            hashed_pw = generate_password_hash(password, method='pbkdf2:sha256')
+            new_user = User(username=username, email=email, password=hashed_pw)
+            db.session.add(new_user)
+            db.session.commit()
+            flash('Compte créé avec succès ! Vous pouvez maintenant vous connecter.', 'success')
+            return redirect(url_for('login'))
+        except Exception as e:
+            db.session.rollback()
+            app.logger.error(f"Erreur lors de la création du compte: {str(e)}")
+            flash('Une erreur est survenue lors de la création du compte', 'error')
+            return redirect(url_for('register'))
+            
+    return render_template('register.html')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+        
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        
+        if not username or not password:
+            flash('Veuillez remplir tous les champs', 'error')
+            return redirect(url_for('login'))
+        
+        user = User.query.filter_by(username=username).first()
+        
+        if user and check_password_hash(user.password, password):
+            login_user(user)
+            flash('Connexion réussie !', 'success')
+            next_page = request.args.get('next')
+            return redirect(next_page or url_for('dashboard'))
+        else:
+            flash('Nom d\'utilisateur ou mot de passe incorrect', 'error')
+            
+    return render_template('login.html')
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    flash('Vous avez été déconnecté avec succès', 'success')
+    return redirect(url_for('login'))
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    user_folder = os.path.join('local_outputs', str(current_user.id))
+    os.makedirs(user_folder, exist_ok=True)
+    files = os.listdir(user_folder)
+    return render_template('dashboard.html', files=files, user=current_user)
 
 @app.route('/upload', methods=['POST'])
+@login_required
 def upload_file():
-    """Endpoint pour l'upload de fichiers."""
     if 'file' not in request.files:
-        return jsonify({'error': 'Aucun fichier dans la requête'}), 400
-    
+        flash('Aucun fichier sélectionné', 'error')
+        return redirect(url_for('dashboard'))
+        
     file = request.files['file']
-    validation_result, message = validate_file(file)
-    
-    if not validation_result:
-        return jsonify({'error': message}), 400
-    
+    if not file or file.filename == '':
+        flash('Aucun fichier sélectionné', 'error')
+        return redirect(url_for('dashboard'))
+        
+    if not allowed_file(file.filename):
+        flash('Type de fichier non autorisé', 'error')
+        return redirect(url_for('dashboard'))
+        
     try:
-        # Sécurisation du nom de fichier
         filename = secure_filename(file.filename)
-        
-        # Création du dossier uploads s'il n'existe pas
-        upload_dir = Path(LOCAL_OUTPUT_DIR)
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Sauvegarde du fichier localement
-        file_path = upload_dir / filename
-        file.save(str(file_path))
-        
-        return jsonify({
-            'message': 'Fichier uploadé avec succès',
-            'filename': filename,
-            'file_path': str(file_path)
-        }), 200
-        
+        user_folder = os.path.join('local_outputs', str(current_user.id))
+        os.makedirs(user_folder, exist_ok=True)
+        file.save(os.path.join(user_folder, filename))
+        flash('Fichier uploadé avec succès', 'success')
     except Exception as e:
-        logger.error(f"Erreur lors de l'upload: {str(e)}")
-        return jsonify({'error': 'Erreur lors de l\'upload du fichier'}), 500
+        app.logger.error(f"Erreur lors de l'upload: {str(e)}")
+        flash('Une erreur est survenue lors de l\'upload du fichier', 'error')
+        
+    return redirect(url_for('dashboard'))
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Endpoint de vérification de santé de l'API."""
-    return jsonify({'status': 'healthy'}), 200
+@app.route('/download/<filename>')
+@login_required
+def download_file(filename):
+    user_folder = os.path.join('local_outputs', str(current_user.id))
+    return send_from_directory(user_folder, filename, as_attachment=True)
 
+@app.route('/delete/<filename>')
+@login_required
+def delete_file(filename):
+    try:
+        user_folder = os.path.join('local_outputs', str(current_user.id))
+        file_path = os.path.join(user_folder, filename)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            flash('Fichier supprimé avec succès', 'success')
+        else:
+            flash('Fichier introuvable', 'error')
+    except Exception as e:
+        app.logger.error(f"Erreur lors de la suppression: {str(e)}")
+        flash('Une erreur est survenue lors de la suppression du fichier', 'error')
+        
+    return redirect(url_for('dashboard'))
+
+@app.route('/api/files', methods=['GET'])
+@login_required
+def api_list_files():
+    user_folder = os.path.join('local_outputs', str(current_user.id))
+    os.makedirs(user_folder, exist_ok=True)
+    files = os.listdir(user_folder)
+    return jsonify({'files': files})
+
+@app.route('/api/upload', methods=['POST'])
+@login_required
+def api_upload_file():
+    if 'file' not in request.files:
+        return jsonify({'error': 'Aucun fichier'}), 400
+    file = request.files['file']
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        user_folder = os.path.join('local_outputs', str(current_user.id))
+        os.makedirs(user_folder, exist_ok=True)
+        file.save(os.path.join(user_folder, filename))
+        return jsonify({'message': 'Fichier uploadé', 'filename': filename}), 200
+    return jsonify({'error': 'Type de fichier non autorisé'}), 400
+
+@app.route('/api/download/<filename>', methods=['GET'])
+@login_required
+def api_download_file(filename):
+    user_folder = os.path.join('local_outputs', str(current_user.id))
+    return send_from_directory(user_folder, filename, as_attachment=True)
+
+@app.route('/api/delete/<filename>', methods=['DELETE'])
+@login_required
+def api_delete_file(filename):
+    user_folder = os.path.join('local_outputs', str(current_user.id))
+    file_path = os.path.join(user_folder, filename)
+    if os.path.exists(file_path):
+        os.remove(file_path)
+        return jsonify({'message': 'Fichier supprimé'})
+    return jsonify({'error': 'Fichier introuvable'}), 404
 
 # --- Main Execution ---
 if __name__ == '__main__':
@@ -1086,24 +1265,3 @@ def clean_ai_html_response(response: str) -> str:
     if response.endswith("```"):
         response = response[:-3]
     return response.strip()
-
-def allowed_file(filename: str) -> bool:
-    """Vérifie si le type de fichier est autorisé."""
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-def validate_file(file) -> Tuple[bool, str]:
-    """Valide le fichier uploadé."""
-    if file is None:
-        return False, "Aucun fichier n'a été fourni"
-    
-    if file.filename == '':
-        return False, "Aucun fichier sélectionné"
-    
-    if not allowed_file(file.filename):
-        return False, "Type de fichier non autorisé"
-    
-    if file.content_length and file.content_length > MAX_CONTENT_LENGTH:
-        return False, "Fichier trop volumineux"
-    
-    return True, ""
