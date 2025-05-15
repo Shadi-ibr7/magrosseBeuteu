@@ -1013,6 +1013,16 @@ def send_to_remote_url(file_path: Path, original_filename: str) -> Tuple[bool, O
 
 
 # --- API Endpoint ---
+@app.route('/', methods=['GET'])
+def index():
+    return '''
+    <h2>Bienvenue sur l'API Upload !</h2>
+    <form action="/upload" method="post" enctype="multipart/form-data">
+      <input type="file" name="file" />
+      <input type="submit" value="Upload" />
+    </form>
+    '''
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     """Endpoint pour l'upload de fichiers."""
