@@ -36,17 +36,9 @@ EXPOSE 5001
 # Ensure it's writable by the user running the app inside the container.
 RUN mkdir -p /app/local_outputs && chmod 777 /app/local_outputs
 
-# --- Use runtime environment variables for sensitive data ---
-# These should be passed at runtime using `docker run -e` or a `.env` file.
-ENV PORT=docker build -t pdf-processor-api .2
+# Set default environment variables
+ENV PORT=5001
 ENV LOCAL_OUTPUT_DIR="/app/local_outputs"
-ENV GEMINI_API_KEY="AIzaSyDmip6WwHwNmDekPTwCo8FK1nnc24Ifhv4"
-ENV S3_BUCKET_NAME="exchange-mern-webapp-bucket"
-ENV AWS_ACCESS_KEY_ID="AKIAZQHXXJFS7HGCYI6R"
-ENV AWS_SECRET_ACCESS_KEY="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"
-ENV AWS_REGION="ap-south-1" 
-ENV LOCAL_OUTPUT_DIR="/app/local_outputs"
-
 
 # Run the application using Gunicorn for production
 CMD ["gunicorn", "app:app"]
